@@ -8,7 +8,7 @@ export interface DocumentRequest {
 	title: string;
 	description: string;
 	content: string;
-	template?: string;
+	template?: any;
 	userData?: UserData;
 	industry?: string;
 	jurisdiction?: string;
@@ -19,141 +19,20 @@ export interface UserData {
 	address: string;
 	phone: string;
 	website: string;
+	email: string;
 	logoUrl?: string;
 	signatureUrl?: string;
 	industry?: string;
 	taxId?: string;
+	bankDetails?: {
+		accountName: string;
+		accountNumber: string;
+		bankName: string;
+		swiftCode: string;
+	};
+	defaultCurrency?: string;
+	paymentTerms?: string;
 }
-
-const DOCUMENT_TYPES = {
-	contract: {
-		sections: [
-			"Parties",
-			"Definitions",
-			"Scope of Work",
-			"Term and Termination",
-			"Payment Terms",
-			"Intellectual Property",
-			"Confidentiality",
-			"Liability",
-			"Force Majeure",
-			"Governing Law",
-			"Signatures",
-		],
-		legalClauses: [
-			"Entire Agreement",
-			"Severability",
-			"Assignment",
-			"Notices",
-			"Amendments",
-			"Waiver",
-			"Counterparts",
-		],
-	},
-	invoice: {
-		sections: [
-			"Company Information",
-			"Client Information",
-			"Invoice Details",
-			"Items/Services",
-			"Subtotal",
-			"Taxes",
-			"Total",
-			"Payment Terms",
-			"Notes",
-		],
-	},
-};
-
-const INDUSTRY_REQUIREMENTS = {
-	technology: {
-		contract: [
-			"Software License Terms",
-			"Data Protection",
-			"Service Level Agreements",
-			"Technical Support",
-			"System Requirements",
-		],
-		invoice: [
-			"Software Development Hours",
-			"License Fees",
-			"Maintenance Charges",
-			"Cloud Services",
-			"Technical Support Hours",
-		],
-	},
-	consulting: {
-		contract: [
-			"Project Milestones",
-			"Deliverables",
-			"Client Responsibilities",
-			"Change Management",
-			"Knowledge Transfer",
-		],
-		invoice: [
-			"Professional Services",
-			"Strategy Development",
-			"Analysis and Research",
-			"Implementation Support",
-			"Training Sessions",
-		],
-	},
-	healthcare: {
-		contract: [
-			"HIPAA Compliance",
-			"Patient Data Protection",
-			"Medical Records Access",
-			"Insurance Requirements",
-			"Liability Coverage",
-		],
-		invoice: [
-			"Medical Services",
-			"Equipment Usage",
-			"Facility Fees",
-			"Professional Fees",
-			"Insurance Processing",
-		],
-	},
-};
-
-const JURISDICTION_REQUIREMENTS = {
-	US: {
-		requirements: [
-			"Comply with state-specific contract laws",
-			"Include governing law clause",
-			"Address dispute resolution",
-			"Specify venue for legal proceedings",
-		],
-		disclaimers: [
-			"This agreement is governed by the laws of [State]",
-			"Any disputes shall be resolved in the courts of [State]",
-		],
-	},
-	UK: {
-		requirements: [
-			"Comply with UK Contract Law",
-			"Address GDPR requirements",
-			"Include VAT details",
-			"Specify jurisdiction as England and Wales",
-		],
-		disclaimers: [
-			"This agreement is governed by the laws of England and Wales",
-			"Subject to the exclusive jurisdiction of the courts of England and Wales",
-		],
-	},
-	EU: {
-		requirements: [
-			"GDPR compliance",
-			"Consumer protection laws",
-			"Data processing agreements",
-			"Right of withdrawal",
-		],
-		disclaimers: [
-			"Compliant with EU consumer protection laws",
-			"Includes mandatory withdrawal period",
-		],
-	},
-};
 
 export async function generateDocument(
 	request: DocumentRequest
@@ -164,74 +43,93 @@ export async function generateDocument(
 
 	const model = genAI.getGenerativeModel({ model: "gemini-pro" });
 
-	// Get document type specific sections and requirements
-	const documentSections = DOCUMENT_TYPES[request.type].sections;
-	const industryReqs =
-		(request.industry &&
-			INDUSTRY_REQUIREMENTS[
-				request.industry as keyof typeof INDUSTRY_REQUIREMENTS
-			]?.[request.type]) ||
-		[];
-	const jurisdictionReqs =
-		request.jurisdiction &&
-		JURISDICTION_REQUIREMENTS[
-			request.jurisdiction as keyof typeof JURISDICTION_REQUIREMENTS
-		];
+	// Extract user data for template
+	const userData = request.userData || {};
+	const templateContent = request.template?.content || "";
 
-	// Build a detailed prompt that guides the AI to generate a structured document
-	const prompt = `Generate a professional ${request.type.toUpperCase()} document with the following specifications:
+	// Create a context object with all available variables
+	const context = {
+		// Document info
+		title: request.title,
+		type: request.type,
+		description: request.description,
+		content: request.content || request.description,
+
+		// Company/User info
+		companyName: userData.companyName || "",
+		address: userData.address || "",
+		phone: userData.phone || "",
+		website: userData.website || "",
+		email: userData.email || "",
+		taxId: userData.taxId || "",
+		industry: userData.industry || "",
+
+		// Banking info
+		bankName: userData.bankDetails?.bankName || "",
+		accountName: userData.bankDetails?.accountName || "",
+		accountNumber: userData.bankDetails?.accountNumber || "",
+		swiftCode: userData.bankDetails?.swiftCode || "",
+
+		// Payment info
+		currency: userData.defaultCurrency || "USD",
+		paymentTerms: userData.paymentTerms || "Net 30",
+
+		// Date info
+		currentDate: new Date().toLocaleDateString(),
+		dueDate: new Date(
+			Date.now() + 30 * 24 * 60 * 60 * 1000
+		).toLocaleDateString(),
+	};
+
+	// Build the prompt for AI
+	const prompt = `Generate a professional ${request.type.toUpperCase()} based on the following information:
 
 Title: ${request.title}
+Description/Requirements: ${request.content || request.description}
 
-Description: ${request.description}
+Use this template structure:
+${templateContent}
 
-User Requirements:
-${request.content}
+Replace all placeholders with appropriate content and format using this data:
+${JSON.stringify(context, null, 2)}
 
-Required Sections:
-${documentSections.map((section) => `- ${section}`).join("\n")}
+Additional Requirements:
+1. Use formal, professional language
+2. Include all user-provided company information where appropriate
+3. Generate realistic, contextually appropriate content for any missing information
+4. Maintain proper document structure and formatting
+5. Use markdown for formatting
+6. For contracts: Include proper legal clauses and protections
+7. For invoices: Generate realistic line items based on the description
 
-${
-	request.industry
-		? `Industry-Specific Requirements (${request.industry}):
-${industryReqs.map((req) => `- ${req}`).join("\n")}`
-		: ""
-}
+Important:
+- Keep all existing template structure
+- Fill in all placeholders with real content
+- Generate appropriate additional content where needed
+- Maintain professional tone and formatting
+- Include all user company details in appropriate places
+- For any missing information, generate realistic placeholder content that matches the context
 
-${
-	jurisdictionReqs
-		? `Jurisdiction Requirements (${request.jurisdiction}):
-${jurisdictionReqs.requirements.map((req) => `- ${req}`).join("\n")}
-
-Legal Disclaimers:
-${jurisdictionReqs.disclaimers.map((disc) => `- ${disc}`).join("\n")}`
-		: ""
-}
-
-${
-	request.type === "contract"
-		? `Standard Legal Clauses:
-${DOCUMENT_TYPES.contract.legalClauses
-	.map((clause) => `- ${clause}`)
-	.join("\n")}`
-		: ""
-}
-
-Format Guidelines:
-1. Use clear, professional language
-2. Include all specified sections
-3. Add proper numbering and references
-4. Use markdown formatting
-5. Include placeholders for signatures and dates
-6. Add appropriate headers and footers
-
-Output the document in markdown format with proper headings (##), lists, and formatting.
-Ensure the content is detailed, professional, and follows all specified requirements.`;
+Output the complete document in markdown format, properly formatted and ready for use.`;
 
 	try {
 		const result = await model.generateContent(prompt);
 		const response = await result.response;
-		return response.text();
+		let generatedContent = response.text();
+
+		// Post-process the content to ensure proper formatting
+		generatedContent = generatedContent
+			.replace(/```markdown/g, "")
+			.replace(/```/g, "")
+			.trim();
+
+		// Replace any remaining template variables with actual values
+		Object.entries(context).forEach(([key, value]) => {
+			const regex = new RegExp(`{{${key}}}`, "g");
+			generatedContent = generatedContent.replace(regex, value);
+		});
+
+		return generatedContent;
 	} catch (error) {
 		console.error("Document generation error:", error);
 		throw new Error("Failed to generate document. Please try again.");
